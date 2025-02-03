@@ -14,3 +14,21 @@ excluded from the sequence.
 
 - What is the first decimal numer in this sequence larger than one quadrillion?
 - What is the corresponding N and which number in the sequence is it?
+
+# Solution
+
+This took me 4 attempts to finally get a working solution:
+
+1. Brute force in python.  Generate Base-N palindromes as a string of digits, Convert to binary.  Check if it was a palindrome.  …   (After 12 minutes, was only in the 10’s of millions and it was taking longer and longer between subsequent P(N) values).   WAY TOO SLOW … as in years or decades.
+
+2. Ok… python is slow, try recoding it C++.  I got to a million in 3 minutes and a billion in an hour.   Nope.
+
+3. Perhaps it was all the allocation/deallocation of memory.   One more recode.  This time in pure C using global buffers to avoid dynamic memory allocation.  I got to a million in just under 3 minutes and a billion in 50 minutes.
+
+4. "And now for something completely different."  Noting that there wasn't much of a time difference between C and C++, 
+I went back to C++ for all the convenience it brings relative to pure C.   **BUT**, I did a major rethink about how to go
+about solving it.  There is plenty of commentary in the file itself, so I won't repeat it here.  Bottom line is that I
+stopped focusing on strings of digits and switched to focusing on bits (*a single unsigned 64 bit integger is more than
+sufficient to hold 1 quadrillion*).  Also I came up with a pseudo-turing machine for generating the palindromes without
+needing to consider the digits themselves.
+
