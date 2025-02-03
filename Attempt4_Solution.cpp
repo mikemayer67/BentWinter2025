@@ -305,14 +305,12 @@ Number_t calc_Pn(Number_t N)
   //   is a binary palindrome as it is an even number..
   Number_t p = N+1;
   for(Count_t L=2; true; ++L) { // yes, an infinte loop... we'll return from inside it
-    OpPtr_t g = new Generator(N,L);
-    while( g->step(p) ) {
+    Generator g(N,L);
+    while( g.step(p) ) {
       if(is_binary_palindrome(p)) {
-        delete g;
         return p;
       }
     }
-    delete g;
   }
   return 0;  // we'll never get here, but to keep the compiler happy
 }
