@@ -28,7 +28,7 @@ This took me 4 attempts to finally get a working solution:
 4. "And now for something completely different."  Noting that there wasn't much of a time difference between C and C++, 
 I went back to C++ for all the convenience it brings relative to pure C.   **BUT**, I did a major rethink about how to go
 about solving it.  There is plenty of commentary in the file itself, so I won't repeat it here.  Bottom line is that I
-stopped focusing on strings of digits and switched to focusing on bits (*a single unsigned 64 bit integger is more than
+stopped focusing on strings of digits and switched to focusing on bits (*a single unsigned 64 bit integer is more than
 sufficient to hold 1 quadrillion*).  Also I came up with a pseudo-turing machine for generating the palindromes without
 needing to consider the digits themselves.
 
