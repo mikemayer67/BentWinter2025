@@ -29,22 +29,22 @@
 // Design Notes
 //-------------------------------------------------------------------------------------------------
 // - History
-//   - This is the fourth attempt to solve this problem
-//   - python implementation, took over a minute to get P(N) > 1 million
-//   - C++ implentation, got to 1 billion in just over 2 minutes
-//   - C implementation did only marginally better than the C++ implementation
+//   This is the fourth attempt to solve this problem
+//   1. python implementation, took over a minute to get P(N) > 1 million
+//   2. C++ implentation, got to 1 billion in just over 2 minutes
+//   3. C implementation did only marginally better than the C++ implementation
 //
 // - What's different here?
 //   - No longer creating arrays of base-N digits
 //   - No longer working in any particular base (other than the internal binary storage)
-//   - A 64-bit unsigned int can store any number for 0 to 2^64-1
+//   - A 64-bit unsigned int can store any number from 0 to 2^64-1
 //      - 2^64 = (2^10)^6 * 2^4 = 16 * (1024)^6, which is slightly larger than 1.6e19
 //      - 1 quadrillion = 1e15
 //      - unless P(N) completely jumps over the quadrillions into the 10s of quintillions, we should be ok
-//   - We can generate Base-N palindromes directly through strategic sequences of additions
-//      - see algorithm for generating the palindromes at the end of this file
+//   - We can generate Base-N palindromes directly through a strategic sequences of additions
+//      - the algorithm for generating the palindromes is described at the end of this file
 //   - We are going WAY BACK here and using a pseudo Turing machine to encode the sequence
-//      - A new sequence machine will be needed for each base examined
+//      - A new sequence machine is needed for each base examined
 //-------------------------------------------------------------------------------------------------
 
 #include <iostream>
@@ -59,14 +59,19 @@ typedef uint64_t Count_t;
 
 std::string hh_mm_ss(time_t t)
 {
+  // used for adding a timestep to each P(N) displayed to stdout
+  // converts a time (in seconds) to (hours):(minutes):(seconds)
   std::stringstream rval;
   rval << std::setw(2) << std::setfill('0') << (t/3600)
     << ":" << std::setw(2) << std::setfill('0')  << ((t%3600)/60)
     << ":" << std::setw(2) << std::setfill('0')  << (t%60);
   return rval.str();
 }
+
 std::string add_commas(Number_t n)
 {
+  // used for displaying the decimal values of P(N) displayed to stdout
+  // adds commas between each group of 3 digits (units, thousands, millions, etc.)
   std::vector<int> blocks;
   while(n > 1000) {
     blocks.push_back(n%1000);
@@ -82,7 +87,10 @@ std::string add_commas(Number_t n)
 
 std::string base_n_str(Number_t n, Number_t N)
 {
-  // taking advantage of the fact we know n is a base N (or 2) palindrome
+  // used for displaying P(N) to stdout in a given base N (which could be 2 for binary)
+  // we take dvantage of the fact we know n is a base N (or 2) palindrome and actually 
+  //   display the number in a little-endian order (which matches the traditional big-endian
+  //   order for a palindrome).
   std::stringstream rval;
   while(n) {
     if(N<=10) { rval << n%N; }
@@ -97,97 +105,153 @@ class Operation
   // Operation is the base class for all atomic and composite
   //   operations in a palindrome generation sequence
 public:
-  // the step function updates the palindrome and returns
-  // whether or not there are more iteration, i.e.,
+  // the step function updates the provided palindrome and returns
+  // whether or not there are more iteration required to complete the operation:
   //   true if the operation is NOT complete
   //   false if the operation IS complete
   virtual bool step(Number_t &palindrome) = 0;
   virtual ~Operation() {}
 };
 
+// we're going to include these in std containers, to make this more readable,
+//   we'll define the following typedefs
 typedef Operation            *OpPtr_t;
 typedef std::vector<OpPtr_t>  OpList_t;
 typedef OpList_t::iterator    OpIter_t;
 
+
 class Increment : public Operation {
-  // The Increment operation updates the palindrom by adding the
-  //   specified increment a specified number of times.
+  // The Increment operation updates the palindrom by adding a
+  //   specified increment (adder) a specified number of times (n).
+  // Each call to the step method makes a single addition.
+  // The operation will complete after being invoked n times.
+  // the operation resets after completion, ready for another series of invocations.
+
+private:
+  const Number_t _adder;    // number to add each step
+  const Count_t  _repeat;   // number of times to repeat the addition
+  Count_t        _counter;  // number of times the addition has been done so far
+
 public:
+  // constructor simply set the initial values fo each attribute
   Increment(Count_t n,Number_t adder) : _adder(adder), _repeat(n), _counter(0)
   {}
+
   virtual bool step(Number_t &palindrome)
   {
+    // let's make sure we don't overflow our 64 bit limit
     if(palindrome > ULLONG_MAX - _adder) {
       std::cout << "64bit is insufficient" << std::endl;
       exit(1);
     }
+    // perform the addition and increment the counter
     palindrome += _adder;
     _counter += 1;
+
+    // if we've performed the specified number of additions,
+    //   reset for the next sequence and return false to indicate
+    //   that we're done with the current operation.
     if (_counter == _repeat) {
       _counter = 0;
       return false; // no more to do
     }
+
+    // return true to indicate that there are still more iterations
+    //   required to complete the operation
     return true; // not yet done
   }
-private:
-  const Number_t _adder;
-  const Count_t  _repeat;
-  Count_t        _counter;
 };
+
 
 class PairedOps : public Operation {
   // The Paired class handles pairs of operations of the form n:[S,I],S
-  //   Note that the S op requires multiple invocations to complete.
+  //   S may be any operation type.
+  //   I is the addition of a single integer value
+  //   Note that the S op may require multiple invocations to complete.
+  // The operation resets after completion, ready for another series of invocations.
+
+private:
+  bool     _on_S;  // flag indicating we are still working on completing S
+  OpPtr_t  _S;     // pointer to the S operation
+  Number_t _I;     // integer value to add during the I operation
+
+  const Count_t  _repeat;   // number of times to repeat the [S,I] sub-sequence
+  Count_t        _counter;  // number of times the [S,I] sub-sequence has been done so far
+
 public:
+  // constructor simply set the initial values fo each attribute
   PairedOps(Count_t n, OpPtr_t S, Number_t I)
-  : _S(S), _I(I), _repeat(n), _counter(0), _first(true)
+  : _S(S), _I(I), _repeat(n), _counter(0), _on_S(true)
   {}
+
   virtual bool step(Number_t &palindrome)
   {
-    if(_counter < _repeat) { // still in n:[S,I]
-      if(_first) { // still in S
+    // repeat the [S,I] sub-sequence n times
+    if(_counter < _repeat) {
+      if(_on_S) { // still in S
+        // continue working on the S operation until it reports that it is complete
         if( ! _S->step(palindrome) ) {
-          // S completed
-          _first = false;
+          // S has been completed, clear _on_S flag
+          _on_S = false;
         }
-      } else { // now in I
+      } else {
+        // S has been completed, add I
+        // but first make sure we won't overflow 64 bits
         if(palindrome > ULLONG_MAX - _I) {
           std::cout << "64bit is insufficient" << std::endl;
           exit(1);
         }
+        // add I, increment the [S,I] counter, and reset the _on_S flag
         palindrome += _I;
         _counter += 1;
-        _first = true;
+        _on_S = true;
       }
-    } else { // now in final S
+    } else {
+      // we've completed the n:[S,I] subsequence
+      // we're working off the final S operation
       if( ! _S->step(palindrome) ) {
-        // paired op is complete
-        _counter = 0; // reset
-        return false; // done
+        // with completion of the final S operation, 
+        //   we've completed the entire PairedOps operation
+        // reset for the next use of this Operation
+        //   and return false to indicate there is nothing more to do
+        _counter = 0;
+        _on_S = true;
+        return false;
       }
     }
-    return true; // not yet done
+
+    // return true to indicate that there are still more iterations
+    //   required to complete the operation
+    return true;
   }
-private:
-  bool _first;
-  const Count_t _repeat;
-  Count_t  _counter;
-  OpPtr_t  _S;
-  Number_t _I;
 };
+
 
 class Generator : public Operation {
   // Generates all of the palindromes with a specified base (N) and length (number of digits).
   // Its final step will generate the first palindrome of length+1.
+  // The operation will complete after completing the generation sequence and the first 
+  //   palindrom of the next length is returned.
+  // The operation does not need to reset on completion as it will only be used once
+
+private:
+  bool _done;     // done with sequence, need to add 2 to increase number of digits
+  OpList_t _S;    // list of all S ops needed for the generation operation
+  OpPtr_t  _seq;  // the generation sequence for the current base and length
+
 public:
+
+  // the Generator constructor wraps all of the operations necessary to generate the palindromes
+  //   of the specified length. (See algoithm at end of this file for details.)
   Generator(Number_t N, Count_t length) : _done(false)
   {
-    // length = 2k+1 (odd) or 2k+2 (even)
+    // set the value of k based on the palindrom link
+    //   length = 2k+1 (odd) or 2k+2 (even)
     Count_t k = (length+1)/2 - 1;
     bool odd = (length % 2 == 1);
     
-    Number_t m = N-1;
-    Number_t q = m-1;
+    Number_t m = N-1;  // largest digit in Base-N
+    Number_t q = m-1;  // second largest digit in Base-N
     
     if( length == 2 ) {
       // this one needs to be handled slightly differently as it starts with 22 rather than 11
@@ -197,14 +261,17 @@ public:
     }
     else
     {
-      // S0 = 1(odd) or 11(even) followed by k 0s
+      // S0 = 1(odd) or 11(even) followed by k zeros
       Number_t M = odd ? N : N*(N+1);
-      // I0 = 11 followed by k-1 0s
+      // I0 = 11 followed by k-1 zeros
       Number_t I = N+1;
+      // add the k-1 zeros
       for(Count_t i=0; i<k-1; ++i) {
         M *= N;
         I *= N;
       }
+
+      // build the sequence (see algorithm at the end of this file)
       OpPtr_t Si = new Increment(m,M);
       _S.push_back(Si);
       for(Count_t i=1; i<k; ++i) {
@@ -216,28 +283,37 @@ public:
       _S.push_back(_seq);
     }
   }
+
   virtual bool step(Number_t &palindrome)
   {
     if(_done) {
-      _done = false;  // reset
+      // done generating palindromes of current length (mmm...mmm)
+      //   add 2 to go to first palindrom of next length (1000...001)
+      // but only after verifying this won't overflow
       if(palindrome > ULLONG_MAX - 2) {
         std::cout << "64bit is insufficient" << std::endl;
         exit(1);
       }
       palindrome += 2;
+
+      // reset (even though it's not necessary) and return false to indicate
+      //   there are no more iterations in generation operation
+      _done = false;
       return false; // complete
-    } else {
+    } 
+    else {
+      // keep working through the generation sequence until it returns false to indicate completeion
       _done = ! _seq->step(palindrome);
     }
-    return true; // not complete until final +2 operation is done
+    // return true to indicate that we're not yet done
+    return true;
   }
-  ~Generator() {
+
+  ~Generator() 
+  {
+    // clean up the list of S operations
     for(auto op = _S.begin(); op!=_S.end(); ++op) { delete *op; }
   }
-private:
-  bool _done;     // done with sequence, need to add 2 to increase number of digits
-  OpList_t _S;    // list of all S ops
-  OpPtr_t  _seq;  // the generation sequence for the current base and length
 };
 
 class IsBinaryPalindrome
@@ -249,7 +325,13 @@ class IsBinaryPalindrome
   //   so that we don't need to iterate through all bits looking for it on each call.
   //   We need only check to see if the msb needs to be increased (when it is less than
   //   the number being tested).
+
+private:
+  Number_t _msb;   // binary number with only the msb set to 1
+  Number_t _mask;  // binary number with only the bits greater than msb set to 1
+
 public:
+  // constructor initializes the msb and mask to indicate a single bit binary number
   IsBinaryPalindrome(void) : _msb(1), _mask(~0x1) {}
   
   bool operator()(Number_t p) {
@@ -285,11 +367,6 @@ public:
     // no differences found --> palindrome
     return true;
   }
-  
-private:
-  Number_t _msb;
-  Number_t _mask;
-private:
 };
 
 Number_t calc_Pn(Number_t N)
@@ -315,15 +392,22 @@ Number_t calc_Pn(Number_t N)
   return 0;  // we'll never get here, but to keep the compiler happy
 }
 
+
 int main(int argc, const char * argv[])
 {
   time_t start_time = std::time(NULL);
   Number_t max_pn = 0;
   Number_t tgt_pn = 1000000000000000; // 1 quadrillion
+
+  // Examine increaseing bases (N) util P(N) exceeds 1 quadrillion
+  //   The upper bound in this for loop is purely to avoid an infitinite-loop.
+  //   It is expected that the loop will be exited LONG before hitting this.
   for(Number_t N=3; N<tgt_pn; ++N)
   {
     Number_t pn = calc_Pn(N);
     if(pn > max_pn) {
+      // only report P(N) values that are larger than the last P(N) value in the 
+      //   solution sequence.
       std::cout 
         << hh_mm_ss(std::time(NULL) - start_time) << "  "
         << N << ": "
@@ -333,7 +417,9 @@ int main(int argc, const char * argv[])
         << std::endl;
       
       max_pn = pn;
+
       if(pn >= tgt_pn) {
+        // if P(N) exceeds 1 quadrillion, we're done... break out of the loop
         break;
       }
     }
